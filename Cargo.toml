@@ -1,6 +1,14 @@
 [package]
 name = "libbonjour"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[lib]
+name = "libbonjour"
+path = "src/lib.rs"
+
+[[bin]]
+name = "query"
+path = "src/bin/query.rs"
 
 [dependencies]
