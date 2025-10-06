@@ -45,7 +45,7 @@ fn main() {
         hostname,
         record_type.into(),
         libbonjour::RecordClass::IN,
-        libbonjour::query_callback,
+        // libbonjour::query_record_callback,
         std::ptr::null_mut(),
     ) {
         Ok(c) => c,
