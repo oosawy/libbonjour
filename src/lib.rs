@@ -43,7 +43,7 @@ impl MDNSClient {
         interface_index: u32,
         callback: bindings::DNSServiceDomainEnumReply,
         context: *mut c_void, /* may be NULL */
-    ) -> Result<MDNSClient, MDNSError> {
+    ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
 
         let error = unsafe {
@@ -76,19 +76,13 @@ impl MDNSClient {
         txt_record: *const c_void, /* may be NULL */
         callback: Option<bindings::DNSServiceRegisterReply>,
         context: *mut c_void, /* may be NULL */
-    ) -> Result<MDNSClient, MDNSError> {
+    ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
 
-        let name = name
-            .map(|s| CString::new(s).map_err(|_| MDNSError::BadParam))
-            .transpose()?;
-        let regtype = CString::new(regtype).map_err(|_| MDNSError::BadParam)?;
-        let domain = domain
-            .map(|s| CString::new(s).map_err(|_| MDNSError::BadParam))
-            .transpose()?;
-        let host = host
-            .map(|s| CString::new(s).map_err(|_| MDNSError::BadParam))
-            .transpose()?;
+        let name = name.map(|s| CString::new(s).unwrap());
+        let regtype = CString::new(regtype).unwrap();
+        let domain = domain.map(|s| CString::new(s).unwrap());
+        let host = host.map(|s| CString::new(s).unwrap());
 
         let error = unsafe {
             bindings::DNSServiceRegister(
@@ -117,17 +111,18 @@ impl MDNSClient {
     // DNSServiceErrorType DNSServiceAddRecord(DNSServiceRef sdRef, DNSRecordRef *RecordRef, DNSServiceFlags flags, uint16_t rrtype, uint16_t rdlen, const void *rdata, uint32_t ttl);
     pub fn add_record(
         &self,
-        record_ref: *mut bindings::DNSRecordRef,
         flags: Flags,
         rrtype: RecordType,
         rdlen: u16,
         rdata: *const c_void,
         ttl: u32,
-    ) -> Result<(), MDNSError> {
+    ) -> Result<Record, MDNSError> {
+        let mut record_ref: bindings::DNSRecordRef = ptr::null_mut();
+
         let error = unsafe {
             bindings::DNSServiceAddRecord(
                 self._ref,
-                record_ref,
+                &mut record_ref,
                 flags.bits(),
                 rrtype.into(),
                 rdlen,
@@ -140,7 +135,7 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(())
+        Ok(Record { _ref: record_ref })
     }
 
     // DNSServiceErrorType DNSServiceUpdateRecord(DNSServiceRef sdRef, DNSRecordRef RecordRef, DNSServiceFlags flags, uint16_t rdlen, const void *rdata, uint32_t ttl);
@@ -187,12 +182,10 @@ impl MDNSClient {
         domain: Option<&str>,
         callback: bindings::DNSServiceBrowseReply,
         context: *mut c_void, /* may be NULL */
-    ) -> Result<MDNSClient, MDNSError> {
+    ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
-        let regtype = CString::new(regtype).map_err(|_| MDNSError::BadParam)?;
-        let domain = domain
-            .map(|s| CString::new(s).map_err(|_| MDNSError::BadParam))
-            .transpose()?;
+        let regtype = CString::new(regtype).unwrap();
+        let domain = domain.map(|s| CString::new(s).unwrap());
 
         let error = unsafe {
             bindings::DNSServiceBrowse(
@@ -222,13 +215,11 @@ impl MDNSClient {
         domain: Option<&str>,
         callback: bindings::DNSServiceResolveReply,
         context: *mut c_void, /* may be NULL */
-    ) -> Result<MDNSClient, MDNSError> {
+    ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
-        let name = CString::new(name).map_err(|_| MDNSError::BadParam)?;
-        let regtype = CString::new(regtype).map_err(|_| MDNSError::BadParam)?;
-        let domain = domain
-            .map(|s| CString::new(s).map_err(|_| MDNSError::BadParam))
-            .transpose()?;
+        let name = CString::new(name).unwrap();
+        let regtype = CString::new(regtype).unwrap();
+        let domain = domain.map(|s| CString::new(s).unwrap());
 
         let error = unsafe {
             bindings::DNSServiceResolve(
@@ -259,9 +250,9 @@ impl MDNSClient {
         rrclass: RecordClass,
         _callback: bindings::DNSServiceQueryRecordReply,
         context: *mut c_void, /* may be NULL */
-    ) -> Result<MDNSClient, MDNSError> {
+    ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
-        let fullname = CString::new(fullname).map_err(|_| MDNSError::BadParam)?;
+        let fullname = CString::new(fullname).unwrap();
 
         let callback = query_callback; // wip: function tranpolin
 
@@ -293,10 +284,10 @@ impl MDNSClient {
         hostname: &str,
         callback: bindings::DNSServiceGetAddrInfoReply,
         context: *mut c_void, /* may be NULL */
-    ) -> Result<MDNSClient, MDNSError> {
+    ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
 
-        let hostname = CString::new(hostname).map_err(|_| MDNSError::BadParam)?;
+        let hostname = CString::new(hostname).unwrap();
 
         let error = unsafe {
             bindings::DNSServiceGetAddrInfo(
@@ -318,7 +309,7 @@ impl MDNSClient {
     }
 
     // DNSServiceErrorType DNSServiceCreateConnection(DNSServiceRef *sdRef);
-    pub fn create_connection() -> Result<MDNSClient, MDNSError> {
+    pub fn create_connection() -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
 
         let error = unsafe { bindings::DNSServiceCreateConnection(&mut service_ref) };
@@ -333,7 +324,6 @@ impl MDNSClient {
     // DNSServiceErrorType DNSServiceRegisterRecord(DNSServiceRef sdRef, DNSRecordRef *RecordRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *fullname, uint16_t rrtype, uint16_t rrclass, uint16_t rdlen, const void *rdata, uint32_t ttl, DNSServiceRegisterRecordReply callBack, void *context);
     pub fn register_record(
         &self,
-        record_ref: *mut bindings::DNSRecordRef,
         flags: Flags,
         interface_index: u32,
         fullname: &str,
@@ -344,16 +334,16 @@ impl MDNSClient {
         ttl: u32,
         callback: bindings::DNSServiceRegisterRecordReply,
         context: *mut c_void, /* may be NULL */
-    ) -> Result<(), MDNSError> {
+    ) -> Result<Record, MDNSError> {
+        let mut record_ref: bindings::DNSRecordRef = ptr::null_mut();
+
         let error = unsafe {
             bindings::DNSServiceRegisterRecord(
                 self._ref,
-                record_ref,
+                &mut record_ref,
                 flags.bits(),
                 interface_index,
-                CString::new(fullname)
-                    .map_err(|_| MDNSError::BadParam)?
-                    .as_ptr(),
+                CString::new(fullname).unwrap().as_ptr(),
                 rrtype.into(),
                 rrclass.into(),
                 rdlen,
@@ -368,7 +358,7 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(())
+        Ok(Record { _ref: record_ref })
     }
 
     // DNSServiceErrorType DNSServiceReconfirmRecord(DNSServiceFlags flags, uint32_t interfaceIndex, const char *fullname, uint16_t rrtype, uint16_t rrclass, uint16_t rdlen, const void *rdata);
@@ -381,7 +371,7 @@ impl MDNSClient {
         rdlen: u16,
         rdata: *const c_void,
     ) -> Result<(), MDNSError> {
-        let fullname = CString::new(fullname).map_err(|_| MDNSError::BadParam)?;
+        let fullname = CString::new(fullname).unwrap();
 
         let error = unsafe {
             bindings::DNSServiceReconfirmRecord(
@@ -412,7 +402,7 @@ impl MDNSClient {
         ttl: u32,           /* time to live in seconds */
         callback: bindings::DNSServiceNATPortMappingReply,
         context: *mut c_void, /* may be NULL */
-    ) -> Result<MDNSClient, MDNSError> {
+    ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
 
         let error = unsafe {
@@ -443,13 +433,13 @@ impl MDNSClient {
         domain: &str,
     ) -> Result<String, MDNSError> {
         let mut full_name = vec![0i8 /* c_char */; bindings::kDNSServiceMaxDomainName as usize];
-        let service = CString::new(service).map_err(|_| MDNSError::BadParam)?;
-        let regtype = CString::new(regtype).map_err(|_| MDNSError::BadParam)?;
-        let domain = CString::new(domain).map_err(|_| MDNSError::BadParam)?;
+        let service = CString::new(service).unwrap();
+        let regtype = CString::new(regtype).unwrap();
+        let domain = CString::new(domain).unwrap();
 
         let error = unsafe {
             bindings::DNSServiceConstructFullName(
-                full_name.as_mut_ptr() as *mut c_char,
+                full_name.as_mut_ptr(),
                 service.as_ptr(),
                 regtype.as_ptr(),
                 domain.as_ptr(),
@@ -461,15 +451,78 @@ impl MDNSClient {
         }
 
         let c_str = unsafe { CStr::from_ptr(full_name.as_ptr() as *const c_char) };
-        let rust_str = c_str.to_str().map_err(|_| MDNSError::BadParam)?.to_owned();
+        let rust_str = c_str.to_str().unwrap().to_owned();
         Ok(rust_str)
     }
+}
 
+pub struct Record {
+    _ref: bindings::DNSRecordRef,
+}
+
+pub struct TextRecord {
+    _ref: bindings::TXTRecordRef,
+}
+
+impl Drop for TextRecord {
+    fn drop(&mut self) {
+        self.deallocate();
+    }
+}
+
+impl TextRecord {
     // void TXTRecordCreate(TXTRecordRef *txtRecord, uint16_t bufferLen, void *buffer);
+    pub fn create(buffer_len: u16, buffer: *mut c_void) -> Self {
+        let mut txt_record: bindings::TXTRecordRef = unsafe { std::mem::zeroed() };
+
+        unsafe {
+            bindings::TXTRecordCreate(&mut txt_record, buffer_len, buffer);
+        }
+
+        TextRecord { _ref: txt_record }
+    }
+
     // void TXTRecordDeallocate(TXTRecordRef *txtRecord);
+    fn deallocate(&mut self) {
+        unsafe {
+            bindings::TXTRecordDeallocate(&mut self._ref);
+        }
+    }
+
     // const void *TXTRecordGetBytesPtr(const TXTRecordRef *txtRecord);
+    pub fn get_bytes_ptr(&self) -> *const c_void {
+        unsafe { bindings::TXTRecordGetBytesPtr(&self._ref) }
+    }
+
     // int TXTRecordContainsKey(uint16_t txtLen, const void *txtRecord, const char *key);
+    pub fn contains_key(&self, txt_len: u16, txt_record: *const c_void, key: &str) -> bool {
+        let key = CString::new(key).unwrap();
+
+        let result = unsafe { bindings::TXTRecordContainsKey(txt_len, txt_record, key.as_ptr()) };
+
+        result != 0
+    }
+
     // const void *TXTRecordGetValuePtr(uint16_t txtLen, const void *txtRecord, const char *key, uint8_t *valueLen);
+    pub fn get_value_ptr(
+        txt_len: u16,
+        txt_record: *const c_void,
+        key: &str,
+    ) -> Option<(*const c_void, u8)> {
+        let mut value_len: u8 = 0;
+
+        let key = CString::new(key).unwrap();
+
+        let value_ptr = unsafe {
+            bindings::TXTRecordGetValuePtr(txt_len, txt_record, key.as_ptr(), &mut value_len)
+        };
+
+        if value_ptr.is_null() {
+            None
+        } else {
+            Some((value_ptr, value_len))
+        }
+    }
 }
 
 pub extern "C" fn query_callback(

@@ -254,10 +254,11 @@ pub type DNSServiceNATPortMappingReply = unsafe extern "C" fn(
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union _TXTRecordRef_t {
-    pub PrivateData: [c_char; 16usize],
-    pub ForceNaturalAlignment: *mut c_char,
+    PrivateData: [c_char; 16usize],
+    ForceNaturalAlignment: *mut c_char,
 }
-type TXTRecordRef = _TXTRecordRef_t;
+
+pub type TXTRecordRef = _TXTRecordRef_t;
 
 // FFI function declarations
 extern "C" {
