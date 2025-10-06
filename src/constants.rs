@@ -6,7 +6,6 @@ use crate::bindings;
 
 bitflags! {
     pub struct Flags: bindings::DNSServiceFlags {
-        const NONE = 0;
         const MoreComing = bindings::kDNSServiceFlagsMoreComing;
         const Add = bindings::kDNSServiceFlagsAdd;
         const Default = bindings::kDNSServiceFlagsDefault;
@@ -58,6 +57,19 @@ impl From<Protocol> for bindings::DNSServiceProtocol {
             Protocol::UDP => 16,
             Protocol::TCP => 32,
             Protocol::Other(code) => code,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordClass {
+    IN,
+}
+
+impl From<RecordClass> for bindings::DNSServiceClass {
+    fn from(class: RecordClass) -> bindings::DNSServiceClass {
+        match class {
+            RecordClass::IN => bindings::kDNSServiceClass_IN,
         }
     }
 }

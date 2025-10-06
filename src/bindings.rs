@@ -25,6 +25,7 @@ pub type DNSRecordRef = *mut _DNSRecordRef_t;
 // Flags, protocols, error type aliases
 pub type DNSServiceFlags = u32;
 pub type DNSServiceProtocol = u32;
+pub type DNSServiceClass = u16;
 pub type DNSServiceRecordType = u16;
 pub type DNSServiceErrorType = i32;
 
@@ -32,7 +33,8 @@ pub type DNSServiceErrorType = i32;
 pub const kDNSServiceMaxServiceName: u32 = 64;
 pub const kDNSServiceMaxDomainName: u32 = 1009;
 pub const kDNSServiceInterfaceIndexAny: u32 = 0;
-pub const kDNSServiceProperty_DaemonVersion: &[u8; 14] = b"DaemonVersion\0";
+pub const kDNSServiceMaxLabel: u32 = u32::MAX - 2;
+pub const kDNSServiceMaxTxtRecordSize: u32 = u32::MAX - 3;
 
 pub const kDNSServiceFlagsMoreComing: DNSServiceFlags = 1;
 pub const kDNSServiceFlagsAdd: DNSServiceFlags = 2;
@@ -160,100 +162,94 @@ pub const kDNSServiceErr_PollingMode: DNSServiceErrorType = -65567;
 pub const kDNSServiceErr_Timeout: DNSServiceErrorType = -65568;
 
 // Callback types
-pub type DNSServiceDomainEnumReply = Option<
-    unsafe extern "C" fn(
-        sdRef: DNSServiceRef,
-        flags: DNSServiceFlags,
-        interfaceIndex: u32,
-        errorCode: DNSServiceErrorType,
-        replyDomain: *const c_char,
-        context: *mut c_void,
-    ),
->;
+pub type DNSServiceDomainEnumReply = unsafe extern "C" fn(
+    sdRef: DNSServiceRef,
+    flags: DNSServiceFlags,
+    interfaceIndex: u32,
+    errorCode: DNSServiceErrorType,
+    replyDomain: *const c_char,
+    context: *mut c_void,
+);
 
-pub type DNSServiceRegisterReply = Option<
-    unsafe extern "C" fn(
-        sdRef: DNSServiceRef,
-        flags: DNSServiceFlags,
-        errorCode: DNSServiceErrorType,
-        name: *const c_char,
-        regtype: *const c_char,
-        domain: *const c_char,
-        context: *mut c_void,
-    ),
->;
+pub type DNSServiceRegisterReply = unsafe extern "C" fn(
+    sdRef: DNSServiceRef,
+    flags: DNSServiceFlags,
+    errorCode: DNSServiceErrorType,
+    name: *const c_char,
+    regtype: *const c_char,
+    domain: *const c_char,
+    context: *mut c_void,
+);
 
-pub type DNSServiceBrowseReply = Option<
-    unsafe extern "C" fn(
-        sdRef: DNSServiceRef,
-        flags: DNSServiceFlags,
-        interfaceIndex: u32,
-        errorCode: DNSServiceErrorType,
-        serviceName: *const c_char,
-        regtype: *const c_char,
-        replyDomain: *const c_char,
-        context: *mut c_void,
-    ),
->;
+pub type DNSServiceBrowseReply = unsafe extern "C" fn(
+    sdRef: DNSServiceRef,
+    flags: DNSServiceFlags,
+    interfaceIndex: u32,
+    errorCode: DNSServiceErrorType,
+    serviceName: *const c_char,
+    regtype: *const c_char,
+    replyDomain: *const c_char,
+    context: *mut c_void,
+);
 
-pub type DNSServiceResolveReply = Option<
-    unsafe extern "C" fn(
-        sdRef: DNSServiceRef,
-        flags: DNSServiceFlags,
-        interfaceIndex: u32,
-        errorCode: DNSServiceErrorType,
-        fullname: *const c_char,
-        hosttarget: *const c_char,
-        port: u16,
-        txtLen: u16,
-        txtRecord: *const c_uchar,
-        context: *mut c_void,
-    ),
->;
+pub type DNSServiceResolveReply = unsafe extern "C" fn(
+    sdRef: DNSServiceRef,
+    flags: DNSServiceFlags,
+    interfaceIndex: u32,
+    errorCode: DNSServiceErrorType,
+    fullname: *const c_char,
+    hosttarget: *const c_char,
+    port: u16,
+    txtLen: u16,
+    txtRecord: *const c_uchar,
+    context: *mut c_void,
+);
 
-pub type DNSServiceQueryRecordReply = Option<
-    unsafe extern "C" fn(
-        sdRef: DNSServiceRef,
-        flags: DNSServiceFlags,
-        interfaceIndex: u32,
-        errorCode: DNSServiceErrorType,
-        fullname: *const c_char,
-        rrtype: u16,
-        rrclass: u16,
-        rdlen: u16,
-        rdata: *const c_void,
-        ttl: u32,
-        context: *mut c_void,
-    ),
->;
+pub type DNSServiceQueryRecordReply = unsafe extern "C" fn(
+    sdRef: DNSServiceRef,
+    flags: DNSServiceFlags,
+    interfaceIndex: u32,
+    errorCode: DNSServiceErrorType,
+    fullname: *const c_char,
+    rrtype: u16,
+    rrclass: u16,
+    rdlen: u16,
+    rdata: *const c_void,
+    ttl: u32,
+    context: *mut c_void,
+);
 
-pub type DNSServiceGetAddrInfoReply = Option<
-    unsafe extern "C" fn(
-        sdRef: DNSServiceRef,
-        flags: DNSServiceFlags,
-        interfaceIndex: u32,
-        errorCode: DNSServiceErrorType,
-        hostname: *const c_char,
-        address: *const c_void, // sockaddr is platform-dependent; keep opaque pointer
-        ttl: u32,
-        context: *mut c_void,
-    ),
->;
+pub type DNSServiceGetAddrInfoReply = unsafe extern "C" fn(
+    sdRef: DNSServiceRef,
+    flags: DNSServiceFlags,
+    interfaceIndex: u32,
+    errorCode: DNSServiceErrorType,
+    hostname: *const c_char,
+    address: *const c_void, // sockaddr is platform-dependent; keep opaque pointer
+    ttl: u32,
+    context: *mut c_void,
+);
 
-pub type DNSServiceNATPortMappingReply = Option<
-    unsafe extern "C" fn(
-        sdRef: DNSServiceRef,
-        flags: DNSServiceFlags,
-        interfaceIndex: u32,
-        errorCode: DNSServiceErrorType,
-        externalAddress: u32,
-        protocol: DNSServiceProtocol,
-        internalPort: u16,
-        externalPort: u16,
-        ttl: u32,
-        context: *mut c_void,
-    ),
->;
+pub type DNSServiceRegisterRecordReply = unsafe extern "C" fn(
+    sdRef: DNSServiceRef,
+    RecordRef: DNSRecordRef,
+    flags: DNSServiceFlags,
+    errorCode: DNSServiceErrorType,
+    context: *mut c_void,
+);
+
+pub type DNSServiceNATPortMappingReply = unsafe extern "C" fn(
+    sdRef: DNSServiceRef,
+    flags: DNSServiceFlags,
+    interfaceIndex: u32,
+    errorCode: DNSServiceErrorType,
+    externalAddress: u32,
+    protocol: DNSServiceProtocol,
+    internalPort: u16,
+    externalPort: u16,
+    ttl: u32,
+    context: *mut c_void,
+);
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -282,27 +278,27 @@ extern "C" {
         flags: DNSServiceFlags,
         interfaceIndex: u32,
         callBack: DNSServiceDomainEnumReply,
-        context: *mut c_void,
+        context: *mut c_void, // may be NULL
     ) -> DNSServiceErrorType;
 
     pub fn DNSServiceRegister(
         sdRef: *mut DNSServiceRef,
         flags: DNSServiceFlags,
         interfaceIndex: u32,
-        name: *const c_char,
+        name: *const c_char, // may be NULL
         regtype: *const c_char,
-        domain: *const c_char,
-        host: *const c_char,
+        domain: *const c_char, // may be NULL
+        host: *const c_char,   // may be NULL
         port: u16,
         txtLen: u16,
-        txtRecord: *const c_void,
-        callBack: DNSServiceRegisterReply,
-        context: *mut c_void,
+        txtRecord: *const c_void,                  // may be NULL
+        callBack: Option<DNSServiceRegisterReply>, // may be NULL
+        context: *mut c_void,                      // may be NULL
     ) -> DNSServiceErrorType;
 
     pub fn DNSServiceAddRecord(
         sdRef: DNSServiceRef,
-        RecordRef: *mut DNSRecordRef,
+        RecordRef: *mut DNSRecordRef, // may be NULL
         flags: DNSServiceFlags,
         rrtype: u16,
         rdlen: u16,
@@ -330,9 +326,9 @@ extern "C" {
         flags: DNSServiceFlags,
         interfaceIndex: u32,
         regtype: *const c_char,
-        domain: *const c_char,
+        domain: *const c_char, // may be NULL
         callBack: DNSServiceBrowseReply,
-        context: *mut c_void,
+        context: *mut c_void, // may be NULL
     ) -> DNSServiceErrorType;
 
     pub fn DNSServiceResolve(
@@ -343,7 +339,7 @@ extern "C" {
         regtype: *const c_char,
         domain: *const c_char,
         callBack: DNSServiceResolveReply,
-        context: *mut c_void,
+        context: *mut c_void, // may be NULL
     ) -> DNSServiceErrorType;
 
     pub fn DNSServiceQueryRecord(
@@ -354,7 +350,7 @@ extern "C" {
         rrtype: u16,
         rrclass: u16,
         callBack: DNSServiceQueryRecordReply,
-        context: *mut c_void,
+        context: *mut c_void, // may be NULL
     ) -> DNSServiceErrorType;
 
     pub fn DNSServiceGetAddrInfo(
@@ -364,7 +360,7 @@ extern "C" {
         protocol: DNSServiceProtocol,
         hostname: *const c_char,
         callBack: DNSServiceGetAddrInfoReply,
-        context: *mut c_void,
+        context: *mut c_void, // may be NULL
     ) -> DNSServiceErrorType;
 
     pub fn DNSServiceCreateConnection(sdRef: *mut DNSServiceRef) -> DNSServiceErrorType;
@@ -380,16 +376,8 @@ extern "C" {
         rdlen: u16,
         rdata: *const c_void,
         ttl: u32,
-        callBack: Option<
-            unsafe extern "C" fn(
-                DNSServiceRef,
-                DNSRecordRef,
-                DNSServiceFlags,
-                DNSServiceErrorType,
-                *mut c_void,
-            ),
-        >,
-        context: *mut c_void,
+        callBack: DNSServiceRegisterRecordReply,
+        context: *mut c_void, // may be NULL
     ) -> DNSServiceErrorType;
 
     pub fn DNSServiceReconfirmRecord(
@@ -411,7 +399,7 @@ extern "C" {
         externalPort: u16,
         ttl: u32,
         callBack: DNSServiceNATPortMappingReply,
-        context: *mut c_void,
+        context: *mut c_void, // may be NULL
     ) -> DNSServiceErrorType;
 
     pub fn DNSServiceConstructFullName(

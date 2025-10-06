@@ -1,4 +1,5 @@
-use libbonjour::{query_record, RecordType};
+use libbonjour::MDNSClient;
+use libbonjour::RecordType;
 use std::env;
 use std::process;
 
@@ -37,7 +38,16 @@ fn main() {
 
     println!("Querying {} for record type {:?}", hostname, record_type);
 
-    let client = match query_record(hostname, record_type) {
+    let flags = libbonjour::Flags::empty();
+    let client = match MDNSClient::query_record(
+        flags,
+        0,
+        hostname,
+        record_type.into(),
+        libbonjour::RecordClass::IN,
+        libbonjour::query_callback,
+        std::ptr::null_mut(),
+    ) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to initiate query: {:?}", e);
