@@ -73,26 +73,32 @@ impl MDNSClient {
         host: Option<&str>,
         port: u16, /* In network byte order */
         txt_len: u16,
-        txt_record: *mut c_void, /* may be NULL */
+        txt_record: *const c_void, /* may be NULL */
         callback: Option<bindings::DNSServiceRegisterReply>,
         context: *mut c_void, /* may be NULL */
     ) -> Result<MDNSClient, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
 
-        let name_c = name.map_or(ptr::null(), |n| CString::new(n).unwrap().into_raw());
-        let regtype_c = CString::new(regtype).unwrap().into_raw();
-        let domain_c = domain.map_or(ptr::null(), |d| CString::new(d).unwrap().into_raw());
-        let host_c = host.map_or(ptr::null(), |h| CString::new(h).unwrap().into_raw());
+        let name = name
+            .map(|s| CString::new(s).map_err(|_| MDNSError::BadParam))
+            .transpose()?;
+        let regtype = CString::new(regtype).map_err(|_| MDNSError::BadParam)?;
+        let domain = domain
+            .map(|s| CString::new(s).map_err(|_| MDNSError::BadParam))
+            .transpose()?;
+        let host = host
+            .map(|s| CString::new(s).map_err(|_| MDNSError::BadParam))
+            .transpose()?;
 
         let error = unsafe {
             bindings::DNSServiceRegister(
                 &mut service_ref,
                 flags.bits(),
                 interface_index,
-                name_c,
-                regtype_c,
-                domain_c,
-                host_c,
+                name.map_or(ptr::null(), |s| s.as_ptr()),
+                regtype.as_ptr(),
+                domain.map_or(ptr::null(), |d| d.as_ptr()),
+                host.map_or(ptr::null(), |h| h.as_ptr()),
                 port,
                 txt_len,
                 txt_record,
@@ -118,11 +124,27 @@ impl MDNSClient {
         rdata: *const c_void,
         ttl: u32,
     ) -> Result<(), MDNSError> {
-        unimplemented!()
+        let error = unsafe {
+            bindings::DNSServiceAddRecord(
+                self._ref,
+                record_ref,
+                flags.bits(),
+                rrtype.into(),
+                rdlen,
+                rdata,
+                ttl,
+            )
+        };
+
+        if error != bindings::kDNSServiceErr_NoError {
+            return Err(MDNSError::from(error));
+        }
+
+        Ok(())
     }
 
     // DNSServiceErrorType DNSServiceUpdateRecord(DNSServiceRef sdRef, DNSRecordRef RecordRef, DNSServiceFlags flags, uint16_t rdlen, const void *rdata, uint32_t ttl);
-    fn update_record(
+    pub fn update_record(
         &self,
         record_ref: bindings::DNSRecordRef, /* may be NULL */
         flags: Flags,
@@ -130,16 +152,31 @@ impl MDNSClient {
         rdata: *const c_void,
         ttl: u32,
     ) -> Result<(), MDNSError> {
-        unimplemented!()
+        let error = unsafe {
+            bindings::DNSServiceUpdateRecord(self._ref, record_ref, flags.bits(), rdlen, rdata, ttl)
+        };
+
+        if error != bindings::kDNSServiceErr_NoError {
+            return Err(MDNSError::from(error));
+        }
+
+        Ok(())
     }
 
     // DNSServiceErrorType DNSServiceRemoveRecord(DNSServiceRef sdRef, DNSRecordRef RecordRef, DNSServiceFlags flags);
-    fn remove_record(
+    pub fn remove_record(
         &self,
         record_ref: bindings::DNSRecordRef,
         flags: Flags,
     ) -> Result<(), MDNSError> {
-        unimplemented!()
+        let error =
+            unsafe { bindings::DNSServiceRemoveRecord(self._ref, record_ref, flags.bits()) };
+
+        if error != bindings::kDNSServiceErr_NoError {
+            return Err(MDNSError::from(error));
+        }
+
+        Ok(())
     }
 
     // DNSServiceErrorType DNSServiceBrowse(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *regtype, const char *domain, DNSServiceBrowseReply callBack, void *context);
@@ -152,18 +189,18 @@ impl MDNSClient {
         context: *mut c_void, /* may be NULL */
     ) -> Result<MDNSClient, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
-        let regtype_c = CString::new(regtype)
-            .map_err(|_| MDNSError::BadParam)?
-            .into_raw();
-        let domain_c = domain.map_or(ptr::null(), |d| CString::new(d).unwrap().into_raw());
+        let regtype = CString::new(regtype).map_err(|_| MDNSError::BadParam)?;
+        let domain = domain
+            .map(|s| CString::new(s).map_err(|_| MDNSError::BadParam))
+            .transpose()?;
 
         let error = unsafe {
             bindings::DNSServiceBrowse(
                 &mut service_ref,
                 flags.bits(),
                 interface_index,
-                regtype_c,
-                domain_c,
+                regtype.as_ptr(),
+                domain.map_or(ptr::null(), |d| d.as_ptr()),
                 callback,
                 context,
             )
@@ -187,22 +224,20 @@ impl MDNSClient {
         context: *mut c_void, /* may be NULL */
     ) -> Result<MDNSClient, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
-        let name_c = CString::new(name)
-            .map_err(|_| MDNSError::BadParam)?
-            .into_raw();
-        let regtype_c = CString::new(regtype)
-            .map_err(|_| MDNSError::BadParam)?
-            .into_raw();
-        let domain_c = domain.map_or(ptr::null(), |d| CString::new(d).unwrap().into_raw());
+        let name = CString::new(name).map_err(|_| MDNSError::BadParam)?;
+        let regtype = CString::new(regtype).map_err(|_| MDNSError::BadParam)?;
+        let domain = domain
+            .map(|s| CString::new(s).map_err(|_| MDNSError::BadParam))
+            .transpose()?;
 
         let error = unsafe {
             bindings::DNSServiceResolve(
                 &mut service_ref,
                 flags.bits(),
                 interface_index,
-                name_c,
-                regtype_c,
-                domain_c,
+                name.as_ptr(),
+                regtype.as_ptr(),
+                domain.map_or(ptr::null(), |d| d.as_ptr()),
                 callback,
                 context,
             )
@@ -226,9 +261,7 @@ impl MDNSClient {
         context: *mut c_void, /* may be NULL */
     ) -> Result<MDNSClient, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
-        let fullname_c = CString::new(fullname)
-            .map_err(|_| MDNSError::BadParam)?
-            .into_raw();
+        let fullname = CString::new(fullname).map_err(|_| MDNSError::BadParam)?;
 
         let callback = query_callback; // wip: function tranpolin
 
@@ -237,7 +270,7 @@ impl MDNSClient {
                 &mut service_ref,
                 flags.bits(),
                 interface_index,
-                fullname_c,
+                fullname.as_ptr(),
                 rrtype.into(),
                 rrclass.into(),
                 callback,
@@ -253,7 +286,7 @@ impl MDNSClient {
     }
 
     // DNSServiceErrorType DNSServiceGetAddrInfo(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, DNSServiceProtocol protocol, const char *hostname, DNSServiceGetAddrInfoReply callBack, void *context);
-    fn get_addr_info(
+    pub fn get_addr_info(
         flags: Flags,
         interface_index: u32,
         protocol: Protocol,
@@ -261,16 +294,44 @@ impl MDNSClient {
         callback: bindings::DNSServiceGetAddrInfoReply,
         context: *mut c_void, /* may be NULL */
     ) -> Result<MDNSClient, MDNSError> {
-        unimplemented!()
+        let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
+
+        let hostname = CString::new(hostname).map_err(|_| MDNSError::BadParam)?;
+
+        let error = unsafe {
+            bindings::DNSServiceGetAddrInfo(
+                &mut service_ref,
+                flags.bits(),
+                interface_index,
+                protocol.into(),
+                hostname.as_ptr(),
+                callback,
+                context,
+            )
+        };
+
+        if error != bindings::kDNSServiceErr_NoError {
+            return Err(MDNSError::from(error));
+        }
+
+        Ok(MDNSClient { _ref: service_ref })
     }
 
     // DNSServiceErrorType DNSServiceCreateConnection(DNSServiceRef *sdRef);
-    fn create_connection() -> Result<MDNSClient, MDNSError> {
-        unimplemented!()
+    pub fn create_connection() -> Result<MDNSClient, MDNSError> {
+        let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
+
+        let error = unsafe { bindings::DNSServiceCreateConnection(&mut service_ref) };
+
+        if error != bindings::kDNSServiceErr_NoError {
+            return Err(MDNSError::from(error));
+        }
+
+        Ok(MDNSClient { _ref: service_ref })
     }
 
     // DNSServiceErrorType DNSServiceRegisterRecord(DNSServiceRef sdRef, DNSRecordRef *RecordRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *fullname, uint16_t rrtype, uint16_t rrclass, uint16_t rdlen, const void *rdata, uint32_t ttl, DNSServiceRegisterRecordReply callBack, void *context);
-    fn register_record(
+    pub fn register_record(
         &self,
         record_ref: *mut bindings::DNSRecordRef,
         flags: Flags,
@@ -281,14 +342,37 @@ impl MDNSClient {
         rdlen: u16,
         rdata: *const c_void,
         ttl: u32,
-        callback: Option<bindings::DNSServiceRegisterRecordReply>,
+        callback: bindings::DNSServiceRegisterRecordReply,
         context: *mut c_void, /* may be NULL */
     ) -> Result<(), MDNSError> {
-        unimplemented!()
+        let error = unsafe {
+            bindings::DNSServiceRegisterRecord(
+                self._ref,
+                record_ref,
+                flags.bits(),
+                interface_index,
+                CString::new(fullname)
+                    .map_err(|_| MDNSError::BadParam)?
+                    .as_ptr(),
+                rrtype.into(),
+                rrclass.into(),
+                rdlen,
+                rdata,
+                ttl,
+                callback,
+                context,
+            )
+        };
+
+        if error != bindings::kDNSServiceErr_NoError {
+            return Err(MDNSError::from(error));
+        }
+
+        Ok(())
     }
 
     // DNSServiceErrorType DNSServiceReconfirmRecord(DNSServiceFlags flags, uint32_t interfaceIndex, const char *fullname, uint16_t rrtype, uint16_t rrclass, uint16_t rdlen, const void *rdata);
-    fn reconfirm_record(
+    pub fn reconfirm_record(
         flags: Flags,
         interface_index: u32,
         fullname: &str,
@@ -297,11 +381,29 @@ impl MDNSClient {
         rdlen: u16,
         rdata: *const c_void,
     ) -> Result<(), MDNSError> {
-        unimplemented!()
+        let fullname = CString::new(fullname).map_err(|_| MDNSError::BadParam)?;
+
+        let error = unsafe {
+            bindings::DNSServiceReconfirmRecord(
+                flags.bits(),
+                interface_index,
+                fullname.as_ptr(),
+                rrtype.into(),
+                rrclass.into(),
+                rdlen,
+                rdata,
+            )
+        };
+
+        if error != bindings::kDNSServiceErr_NoError {
+            return Err(MDNSError::from(error));
+        }
+
+        Ok(())
     }
 
     // DNSServiceErrorType DNSServiceNATPortMappingCreate(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, DNSServiceProtocol protocol, uint16_t internalPort, uint16_t externalPort, uint32_t ttl, DNSServiceNATPortMappingReply callBack, void *context);
-    fn nat_port_mapping_create(
+    pub fn nat_port_mapping_create(
         flags: Flags,
         interface_index: u32,
         protocol: Protocol, /* TCP and/or UDP */
@@ -311,16 +413,56 @@ impl MDNSClient {
         callback: bindings::DNSServiceNATPortMappingReply,
         context: *mut c_void, /* may be NULL */
     ) -> Result<MDNSClient, MDNSError> {
-        unimplemented!()
+        let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
+
+        let error = unsafe {
+            bindings::DNSServiceNATPortMappingCreate(
+                &mut service_ref,
+                flags.bits(),
+                interface_index,
+                protocol.into(),
+                internal_port,
+                external_port,
+                ttl,
+                callback,
+                context,
+            )
+        };
+
+        if error != bindings::kDNSServiceErr_NoError {
+            return Err(MDNSError::from(error));
+        }
+
+        Ok(MDNSClient { _ref: service_ref })
     }
 
     // DNSServiceErrorType DNSServiceConstructFullName(char *const fullName, const char *const service, const char *const regtype, const char *const domain);
-    fn construct_full_name(
+    pub fn construct_full_name(
         service: &str,
         regtype: &str,
         domain: &str,
     ) -> Result<String, MDNSError> {
-        unimplemented!()
+        let mut full_name = vec![0i8 /* c_char */; bindings::kDNSServiceMaxDomainName as usize];
+        let service = CString::new(service).map_err(|_| MDNSError::BadParam)?;
+        let regtype = CString::new(regtype).map_err(|_| MDNSError::BadParam)?;
+        let domain = CString::new(domain).map_err(|_| MDNSError::BadParam)?;
+
+        let error = unsafe {
+            bindings::DNSServiceConstructFullName(
+                full_name.as_mut_ptr() as *mut c_char,
+                service.as_ptr(),
+                regtype.as_ptr(),
+                domain.as_ptr(),
+            )
+        };
+
+        if error != bindings::kDNSServiceErr_NoError {
+            return Err(MDNSError::from(error));
+        }
+
+        let c_str = unsafe { CStr::from_ptr(full_name.as_ptr() as *const c_char) };
+        let rust_str = c_str.to_str().map_err(|_| MDNSError::BadParam)?.to_owned();
+        Ok(rust_str)
     }
 
     // void TXTRecordCreate(TXTRecordRef *txtRecord, uint16_t bufferLen, void *buffer);
