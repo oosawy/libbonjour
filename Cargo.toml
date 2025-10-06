@@ -12,3 +12,4 @@ name = "query"
 path = "src/bin/query.rs"
 
 [dependencies]
+bitflags = "2.9.4"

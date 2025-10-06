@@ -14,7 +14,7 @@ pub struct MDNSClient {
 impl MDNSClient {
     pub fn process_result(&self) -> Result<(), MDNSError> {
         let error = unsafe { bindings::DNSServiceProcessResult(self._ref) };
-        if error == 0 {
+        if error == bindings::kDNSServiceErr_NoError {
             Ok(())
         } else {
             Err(MDNSError::from(error))
@@ -70,13 +70,13 @@ extern "C" fn query_callback(
 
 pub fn query_record(hostname: &str, record_type: RecordType) -> Result<MDNSClient, MDNSError> {
     let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
-    let flags = 0;
+    let flags = Flags::NONE;
     let hostname_c = CString::new(hostname).map_err(|_| MDNSError::BadParam)?;
 
     let error = unsafe {
         bindings::DNSServiceQueryRecord(
             &mut service_ref,
-            flags,
+            flags.bits(),
             bindings::kDNSServiceInterfaceIndexAny,
             hostname_c.as_ptr(),
             record_type.into(),
@@ -86,7 +86,7 @@ pub fn query_record(hostname: &str, record_type: RecordType) -> Result<MDNSClien
         )
     };
 
-    if error != 0 {
+    if error != bindings::kDNSServiceErr_NoError {
         return Err(MDNSError::from(error));
     }
 

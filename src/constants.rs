@@ -1,82 +1,31 @@
 #![allow(non_camel_case_types, non_upper_case_globals, dead_code)]
 
+use bitflags::bitflags;
+
 use crate::bindings;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Flags {
-    MoreComing,
-    Add,
-    Default,
-    NoAutoRename,
-    Shared,
-    Unique,
-    BrowseDomains,
-    RegistrationDomains,
-    LongLivedQuery,
-    AllowRemoteQuery,
-    ForceMulticast,
-    Force,
-    ReturnIntermediates,
-    NonBrowsable,
-    ShareConnection,
-    SuppressUnusable,
-    Timeout,
-    IncludeP2P,
-    WakeOnResolve,
-    Other(bindings::DNSServiceFlags),
-}
-
-impl From<bindings::DNSServiceFlags> for Flags {
-    fn from(code: bindings::DNSServiceFlags) -> Self {
-        match code {
-            1 => Flags::MoreComing,
-            2 => Flags::Add,
-            4 => Flags::Default,
-            8 => Flags::NoAutoRename,
-            16 => Flags::Shared,
-            32 => Flags::Unique,
-            64 => Flags::BrowseDomains,
-            128 => Flags::RegistrationDomains,
-            256 => Flags::LongLivedQuery,
-            512 => Flags::AllowRemoteQuery,
-            1024 => Flags::ForceMulticast,
-            2048 => Flags::Force,
-            4096 => Flags::ReturnIntermediates,
-            8192 => Flags::NonBrowsable,
-            16384 => Flags::ShareConnection,
-            32768 => Flags::SuppressUnusable,
-            65536 => Flags::Timeout,
-            131072 => Flags::IncludeP2P,
-            262144 => Flags::WakeOnResolve,
-            other => Flags::Other(other),
-        }
-    }
-}
-
-impl From<Flags> for bindings::DNSServiceFlags {
-    fn from(flag: Flags) -> bindings::DNSServiceFlags {
-        match flag {
-            Flags::MoreComing => 1,
-            Flags::Add => 2,
-            Flags::Default => 4,
-            Flags::NoAutoRename => 8,
-            Flags::Shared => 16,
-            Flags::Unique => 32,
-            Flags::BrowseDomains => 64,
-            Flags::RegistrationDomains => 128,
-            Flags::LongLivedQuery => 256,
-            Flags::AllowRemoteQuery => 512,
-            Flags::ForceMulticast => 1024,
-            Flags::Force => 2048,
-            Flags::ReturnIntermediates => 4096,
-            Flags::NonBrowsable => 8192,
-            Flags::ShareConnection => 16384,
-            Flags::SuppressUnusable => 32768,
-            Flags::Timeout => 65536,
-            Flags::IncludeP2P => 131072,
-            Flags::WakeOnResolve => 262144,
-            Flags::Other(code) => code,
-        }
+bitflags! {
+    pub struct Flags: bindings::DNSServiceFlags {
+        const NONE = 0;
+        const MoreComing = bindings::kDNSServiceFlagsMoreComing;
+        const Add = bindings::kDNSServiceFlagsAdd;
+        const Default = bindings::kDNSServiceFlagsDefault;
+        const NoAutoRename = bindings::kDNSServiceFlagsNoAutoRename;
+        const Shared = bindings::kDNSServiceFlagsShared;
+        const Unique = bindings::kDNSServiceFlagsUnique;
+        const BrowseDomains = bindings::kDNSServiceFlagsBrowseDomains;
+        const RegistrationDomains = bindings::kDNSServiceFlagsRegistrationDomains;
+        const LongLivedQuery = bindings::kDNSServiceFlagsLongLivedQuery;
+        const AllowRemoteQuery = bindings::kDNSServiceFlagsAllowRemoteQuery;
+        const ForceMulticast = bindings::kDNSServiceFlagsForceMulticast;
+        const Force = bindings::kDNSServiceFlagsForce;
+        const ReturnIntermediates = bindings::kDNSServiceFlagsReturnIntermediates;
+        const NonBrowsable = bindings::kDNSServiceFlagsNonBrowsable;
+        const ShareConnection = bindings::kDNSServiceFlagsShareConnection;
+        const SuppressUnusable = bindings::kDNSServiceFlagsSuppressUnusable;
+        const Timeout = bindings::kDNSServiceFlagsTimeout;
+        const IncludeP2P = bindings::kDNSServiceFlagsIncludeP2P;
+        const WakeOnResolve = bindings::kDNSServiceFlagsWakeOnResolve;
     }
 }
 
