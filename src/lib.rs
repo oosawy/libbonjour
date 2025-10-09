@@ -3,12 +3,15 @@ use std::os::raw::{c_char, c_void};
 use std::ptr;
 
 mod bindings;
-mod constants;
+pub mod constants;
+mod context;
 
 pub use constants::*;
+use context::*;
 
 pub struct MDNSClient {
     _ref: bindings::DNSServiceRef,
+    _ctx: Option<OwnedCtx>,
 }
 
 impl MDNSClient {
@@ -29,10 +32,35 @@ impl MDNSClient {
 impl Drop for MDNSClient {
     fn drop(&mut self) {
         if !self._ref.is_null() {
-            unsafe {
-                bindings::DNSServiceRefDeallocate(self._ref);
-            }
+            unsafe { bindings::DNSServiceRefDeallocate(self._ref) };
         }
+        drop(self._ctx.take());
+    }
+}
+
+pub struct Record<'a> {
+    #[allow(dead_code)]
+    client: &'a MDNSClient,
+    _ref: bindings::DNSRecordRef,
+    _ctx: Option<OwnedCtx>,
+}
+
+impl<'a> Record<'a> {
+    // fn _remove(self, flags: Flags) -> Result<(), MDNSError> {
+    //     let err =
+    //         unsafe { bindings::DNSServiceRemoveRecord(self.client._ref, self._ref, flags.bits()) };
+
+    //     if err != bindings::kDNSServiceErr_NoError {
+    //         return Err(MDNSError::from(err));
+    //     }
+
+    //     Ok(())
+    // }
+}
+
+impl<'a> Drop for Record<'a> {
+    fn drop(&mut self) {
+        drop(self._ctx.take());
     }
 }
 
@@ -41,18 +69,20 @@ impl MDNSClient {
     pub fn enumerate_domains(
         flags: Flags,
         interface_index: u32,
-        // _callback: bindings::DNSServiceDomainEnumReply,
-        context: *mut c_void, /* may be NULL */
+        callback: impl Fn(Flags, u32, MDNSError, String) + Send + 'static,
     ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
+        let ctx = OwnedCtx::new(trampolines::DomainEnumContext {
+            callback: Box::new(callback),
+        });
 
         let error = unsafe {
             bindings::DNSServiceEnumerateDomains(
                 &mut service_ref,
                 flags.bits(),
                 interface_index,
-                callbacks::domain_enum_reply,
-                context,
+                trampolines::domain_enum_reply,
+                ctx.as_ptr(),
             )
         };
 
@@ -60,7 +90,10 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(MDNSClient { _ref: service_ref })
+        Ok(MDNSClient {
+            _ref: service_ref,
+            _ctx: Some(ctx),
+        })
     }
 
     // DNSServiceErrorType DNSServiceRegister(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *name, const char *regtype, const char *domain, const char *host, uint16_t port, uint16_t txtLen, const void *txtRecord, DNSServiceRegisterReply callBack, void *context);
@@ -74,16 +107,25 @@ impl MDNSClient {
         port: u16,
         txt_len: u16,
         txt_record: *const c_void, /* may be NULL */
-        // _callback: Option<bindings::DNSServiceRegisterReply>,
-        context: *mut c_void, /* may be NULL */
+        callback: Option<impl Fn(Flags, MDNSError, String, String, String) + Send + 'static>,
     ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
 
-        let name = name.map(|s| CString::new(s).unwrap());
-        let regtype = CString::new(regtype).unwrap();
-        let domain = domain.map(|s| CString::new(s).unwrap());
-        let host = host.map(|s| CString::new(s).unwrap());
+        let name = name.map(|s| CString::new(s).expect("invalid NUL in name string"));
+        let regtype = CString::new(regtype).expect("invalid NUL in regtype string");
+        let domain = domain.map(|s| CString::new(s).expect("invalid NUL in domain string"));
+        let host = host.map(|s| CString::new(s).expect("invalid NUL in host string"));
         let port = port.to_be();
+
+        let (callback_ptr, ctx_opt): (*mut c_void, Option<OwnedCtx>) = match callback {
+            Some(cb) => {
+                let ctx = OwnedCtx::new(trampolines::RegisterContext {
+                    callback: Box::new(cb),
+                });
+                (ctx.as_ptr(), Some(ctx))
+            }
+            None => (ptr::null_mut(), None),
+        };
 
         let error = unsafe {
             bindings::DNSServiceRegister(
@@ -97,8 +139,12 @@ impl MDNSClient {
                 port, /* In network byte order */
                 txt_len,
                 txt_record,
-                Some(callbacks::register_reply),
-                context,
+                if callback_ptr.is_null() {
+                    None
+                } else {
+                    Some(trampolines::register_reply)
+                },
+                callback_ptr,
             )
         };
 
@@ -106,7 +152,10 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(MDNSClient { _ref: service_ref })
+        Ok(MDNSClient {
+            _ref: service_ref,
+            _ctx: ctx_opt,
+        })
     }
 
     // DNSServiceErrorType DNSServiceAddRecord(DNSServiceRef sdRef, DNSRecordRef *RecordRef, DNSServiceFlags flags, uint16_t rrtype, uint16_t rdlen, const void *rdata, uint32_t ttl);
@@ -117,7 +166,7 @@ impl MDNSClient {
         rdlen: u16,
         rdata: *const c_void,
         ttl: u32,
-    ) -> Result<Record, MDNSError> {
+    ) -> Result<Record<'_>, MDNSError> {
         let mut record_ref: bindings::DNSRecordRef = ptr::null_mut();
 
         let error = unsafe {
@@ -136,7 +185,11 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(Record { _ref: record_ref })
+        Ok(Record {
+            client: self,
+            _ref: record_ref,
+            _ctx: None,
+        })
     }
 
     // DNSServiceErrorType DNSServiceUpdateRecord(DNSServiceRef sdRef, DNSRecordRef RecordRef, DNSServiceFlags flags, uint16_t rdlen, const void *rdata, uint32_t ttl);
@@ -181,12 +234,14 @@ impl MDNSClient {
         interface_index: u32,
         regtype: &str,
         domain: Option<&str>,
-        // _callback: bindings::DNSServiceBrowseReply,
-        context: *mut c_void, /* may be NULL */
+        callback: impl Fn(Flags, u32, MDNSError, String, String, String) + Send + 'static,
     ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
-        let regtype = CString::new(regtype).unwrap();
-        let domain = domain.map(|s| CString::new(s).unwrap());
+        let regtype = CString::new(regtype).expect("invalid NUL in regtype string");
+        let domain = domain.map(|s| CString::new(s).expect("invalid NUL in domain string"));
+        let ctx = OwnedCtx::new(trampolines::BrowseContext {
+            callback: Box::new(callback),
+        });
 
         let error = unsafe {
             bindings::DNSServiceBrowse(
@@ -195,8 +250,8 @@ impl MDNSClient {
                 interface_index,
                 regtype.as_ptr(),
                 domain.map_or(ptr::null(), |d| d.as_ptr()),
-                callbacks::browse_reply,
-                context,
+                trampolines::browse_reply,
+                ctx.as_ptr(),
             )
         };
 
@@ -204,7 +259,10 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(MDNSClient { _ref: service_ref })
+        Ok(MDNSClient {
+            _ref: service_ref,
+            _ctx: Some(ctx),
+        })
     }
 
     // DNSServiceErrorType DNSServiceResolve(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *name, const char *regtype, const char *domain, DNSServiceResolveReply callBack, void *context);
@@ -214,13 +272,17 @@ impl MDNSClient {
         name: &str,
         regtype: &str,
         domain: Option<&str>,
-        // _callback: bindings::DNSServiceResolveReply,
-        context: *mut c_void, /* may be NULL */
+        callback: impl Fn(Flags, u32, MDNSError, String, String, u16, u16, *const c_uchar)
+            + Send
+            + 'static,
     ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
-        let name = CString::new(name).unwrap();
-        let regtype = CString::new(regtype).unwrap();
-        let domain = domain.map(|s| CString::new(s).unwrap());
+        let name = CString::new(name).expect("invalid NUL in name string");
+        let regtype = CString::new(regtype).expect("invalid NUL in regtype string");
+        let domain = domain.map(|s| CString::new(s).expect("invalid NUL in domain string"));
+        let ctx = OwnedCtx::new(trampolines::ResolveContext {
+            callback: Box::new(callback),
+        });
 
         let error = unsafe {
             bindings::DNSServiceResolve(
@@ -230,8 +292,8 @@ impl MDNSClient {
                 name.as_ptr(),
                 regtype.as_ptr(),
                 domain.map_or(ptr::null(), |d| d.as_ptr()),
-                callbacks::resolve_reply,
-                context,
+                trampolines::resolve_reply,
+                ctx.as_ptr(),
             )
         };
 
@@ -239,7 +301,10 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(MDNSClient { _ref: service_ref })
+        Ok(MDNSClient {
+            _ref: service_ref,
+            _ctx: Some(ctx),
+        })
     }
 
     // DNSServiceErrorType DNSServiceQueryRecord(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *fullname, uint16_t rrtype, uint16_t rrclass, DNSServiceQueryRecordReply callBack, void *context);
@@ -249,11 +314,15 @@ impl MDNSClient {
         fullname: &str,
         rrtype: RecordType,
         rrclass: RecordClass,
-        // _callback: bindings::DNSServiceQueryRecordReply,
-        context: *mut c_void, /* may be NULL */
+        callback: impl Fn(Flags, u32, MDNSError, String, u16, u16, u16, *const c_void, u32)
+            + Send
+            + 'static,
     ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
-        let fullname = CString::new(fullname).unwrap();
+        let fullname = CString::new(fullname).expect("invalid NUL in fullname string");
+        let ctx = OwnedCtx::new(trampolines::QueryRecordContext {
+            callback: Box::new(callback),
+        });
 
         let error = unsafe {
             bindings::DNSServiceQueryRecord(
@@ -263,8 +332,8 @@ impl MDNSClient {
                 fullname.as_ptr(),
                 rrtype.into(),
                 rrclass.into(),
-                callbacks::query_record_reply,
-                context,
+                trampolines::query_record_reply,
+                ctx.as_ptr(),
             )
         };
 
@@ -272,7 +341,10 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(MDNSClient { _ref: service_ref })
+        Ok(MDNSClient {
+            _ref: service_ref,
+            _ctx: Some(ctx),
+        })
     }
 
     // DNSServiceErrorType DNSServiceGetAddrInfo(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, DNSServiceProtocol protocol, const char *hostname, DNSServiceGetAddrInfoReply callBack, void *context);
@@ -281,12 +353,14 @@ impl MDNSClient {
         interface_index: u32,
         protocol: Protocol,
         hostname: &str,
-        // _callback: bindings::DNSServiceGetAddrInfoReply,
-        context: *mut c_void, /* may be NULL */
+        callback: impl Fn(Flags, u32, MDNSError, String, *const c_void, u32) + Send + 'static,
     ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
 
-        let hostname = CString::new(hostname).unwrap();
+        let hostname = CString::new(hostname).expect("invalid NUL in hostname string");
+        let ctx = OwnedCtx::new(trampolines::GetAddrInfoContext {
+            callback: Box::new(callback),
+        });
 
         let error = unsafe {
             bindings::DNSServiceGetAddrInfo(
@@ -295,8 +369,8 @@ impl MDNSClient {
                 interface_index,
                 protocol.into(),
                 hostname.as_ptr(),
-                callbacks::get_addr_info_reply,
-                context,
+                trampolines::get_addr_info_reply,
+                ctx.as_ptr(),
             )
         };
 
@@ -304,7 +378,10 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(MDNSClient { _ref: service_ref })
+        Ok(MDNSClient {
+            _ref: service_ref,
+            _ctx: Some(ctx),
+        })
     }
 
     // DNSServiceErrorType DNSServiceCreateConnection(DNSServiceRef *sdRef);
@@ -317,7 +394,10 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(MDNSClient { _ref: service_ref })
+        Ok(MDNSClient {
+            _ref: service_ref,
+            _ctx: None,
+        })
     }
 
     // DNSServiceErrorType DNSServiceRegisterRecord(DNSServiceRef sdRef, DNSRecordRef *RecordRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *fullname, uint16_t rrtype, uint16_t rrclass, uint16_t rdlen, const void *rdata, uint32_t ttl, DNSServiceRegisterRecordReply callBack, void *context);
@@ -331,10 +411,14 @@ impl MDNSClient {
         rdlen: u16,
         rdata: *const c_void,
         ttl: u32,
-        // _callback: bindings::DNSServiceRegisterRecordReply,
-        context: *mut c_void, /* may be NULL */
-    ) -> Result<Record, MDNSError> {
+        callback: impl Fn(Flags, MDNSError) + Send + 'static,
+    ) -> Result<Record<'_>, MDNSError> {
         let mut record_ref: bindings::DNSRecordRef = ptr::null_mut();
+
+        let fullname = CString::new(fullname).expect("invalid NUL in fullname string");
+        let ctx = OwnedCtx::new(trampolines::RegisterRecordContext {
+            callback: Box::new(callback),
+        });
 
         let error = unsafe {
             bindings::DNSServiceRegisterRecord(
@@ -342,14 +426,14 @@ impl MDNSClient {
                 &mut record_ref,
                 flags.bits(),
                 interface_index,
-                CString::new(fullname).unwrap().as_ptr(),
+                fullname.as_ptr(),
                 rrtype.into(),
                 rrclass.into(),
                 rdlen,
                 rdata,
                 ttl,
-                callbacks::register_record_reply,
-                context,
+                trampolines::register_record_reply,
+                ctx.as_ptr(),
             )
         };
 
@@ -357,7 +441,11 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(Record { _ref: record_ref })
+        Ok(Record {
+            client: self,
+            _ref: record_ref,
+            _ctx: Some(ctx),
+        })
     }
 
     // DNSServiceErrorType DNSServiceReconfirmRecord(DNSServiceFlags flags, uint32_t interfaceIndex, const char *fullname, uint16_t rrtype, uint16_t rrclass, uint16_t rdlen, const void *rdata);
@@ -370,7 +458,7 @@ impl MDNSClient {
         rdlen: u16,
         rdata: *const c_void,
     ) -> Result<(), MDNSError> {
-        let fullname = CString::new(fullname).unwrap();
+        let fullname = CString::new(fullname).expect("invalid NUL in fullname string");
 
         let error = unsafe {
             bindings::DNSServiceReconfirmRecord(
@@ -399,13 +487,17 @@ impl MDNSClient {
         internal_port: u16,
         external_port: u16,
         ttl: u32, /* time to live in seconds */
-        // _callback: bindings::DNSServiceNATPortMappingReply,
-        context: *mut c_void, /* may be NULL */
+        callback: impl Fn(Flags, u32, MDNSError, std::net::Ipv4Addr, Protocol, u16, u16, u32)
+            + Send
+            + 'static,
     ) -> Result<Self, MDNSError> {
         let mut service_ref: bindings::DNSServiceRef = ptr::null_mut();
 
         let internal_port = internal_port.to_be();
         let external_port = external_port.to_be();
+        let ctx = OwnedCtx::new(trampolines::NATPortMappingContext {
+            callback: Box::new(callback),
+        });
 
         let error = unsafe {
             bindings::DNSServiceNATPortMappingCreate(
@@ -416,8 +508,8 @@ impl MDNSClient {
                 internal_port, /* network byte order */
                 external_port, /* network byte order */
                 ttl,
-                callbacks::nat_port_mapping_reply,
-                context,
+                trampolines::nat_port_mapping_reply,
+                ctx.as_ptr(),
             )
         };
 
@@ -425,7 +517,10 @@ impl MDNSClient {
             return Err(MDNSError::from(error));
         }
 
-        Ok(MDNSClient { _ref: service_ref })
+        Ok(MDNSClient {
+            _ref: service_ref,
+            _ctx: Some(ctx),
+        })
     }
 
     // DNSServiceErrorType DNSServiceConstructFullName(char *const fullName, const char *const service, const char *const regtype, const char *const domain);
@@ -435,9 +530,9 @@ impl MDNSClient {
         domain: &str,
     ) -> Result<String, MDNSError> {
         let mut full_name = vec![0i8 /* c_char */; bindings::kDNSServiceMaxDomainName as usize];
-        let service = CString::new(service).unwrap();
-        let regtype = CString::new(regtype).unwrap();
-        let domain = CString::new(domain).unwrap();
+        let service = CString::new(service).expect("invalid NUL in service string");
+        let regtype = CString::new(regtype).expect("invalid NUL in regtype string");
+        let domain = CString::new(domain).expect("invalid NUL in domain string");
 
         let error = unsafe {
             bindings::DNSServiceConstructFullName(
@@ -456,10 +551,6 @@ impl MDNSClient {
         let rust_str = c_str.to_str().unwrap().to_owned();
         Ok(rust_str)
     }
-}
-
-pub struct Record {
-    _ref: bindings::DNSRecordRef,
 }
 
 pub struct TextRecord {
@@ -527,11 +618,124 @@ impl TextRecord {
     }
 }
 
-// Callback types
-
+// Trampolines for C function pointers
 #[allow(unused_variables)]
-mod callbacks {
+mod trampolines {
     use super::*;
+
+    // DomainEnum
+    type DomainEnumCallback = dyn Fn(
+            Flags,     /* flags */
+            u32,       /* interfaceIndex */
+            MDNSError, /* error */
+            String,    /* replyDomain */
+        ) + Send;
+    pub struct DomainEnumContext {
+        pub callback: Box<DomainEnumCallback>,
+    }
+    impl Context for DomainEnumContext {}
+
+    // Register
+    type RegisterCallback = dyn Fn(
+            Flags,     /* flags */
+            MDNSError, /* error */
+            String,    /* name */
+            String,    /* regtype */
+            String,    /* domain */
+        ) + Send;
+    pub struct RegisterContext {
+        pub callback: Box<RegisterCallback>,
+    }
+    impl Context for RegisterContext {}
+
+    // Browse
+    type BrowseCallback = dyn Fn(
+            Flags,     /* flags */
+            u32,       /* interfaceIndex */
+            MDNSError, /* error */
+            String,    /* serviceName */
+            String,    /* regtype */
+            String,    /* replyDomain */
+        ) + Send;
+    pub struct BrowseContext {
+        pub callback: Box<BrowseCallback>,
+    }
+    impl Context for BrowseContext {}
+
+    // Resolve
+    type ResolveCallback = dyn Fn(
+            Flags,          /* flags */
+            u32,            /* interfaceIndex */
+            MDNSError,      /* error */
+            String,         /* fullname */
+            String,         /* hosttarget */
+            u16,            /* port */
+            u16,            /* txtLen */
+            *const c_uchar, /* txtRecord */
+        ) + Send;
+    pub struct ResolveContext {
+        pub callback: Box<ResolveCallback>,
+    }
+    impl Context for ResolveContext {}
+
+    // QueryRecord
+    type QueryRecordCallback = dyn Fn(
+            Flags,         /* flags */
+            u32,           /* interfaceIndex */
+            MDNSError,     /* error */
+            String,        /* fullname */
+            u16,           /* rrtype */
+            u16,           /* rrclass */
+            u16,           /* rdlen */
+            *const c_void, /* rdata */
+            u32,           /* ttl */
+        ) + Send;
+    pub struct QueryRecordContext {
+        pub callback: Box<QueryRecordCallback>,
+    }
+    impl Context for QueryRecordContext {}
+
+    // GetAddrInfo
+    type GetAddrInfoCallback = dyn Fn(
+            Flags,         /* flags */
+            u32,           /* interfaceIndex */
+            MDNSError,     /* error */
+            String,        /* hostname */
+            *const c_void, /* address (sockaddr) */
+            u32,           /* ttl */
+        ) + Send;
+    pub struct GetAddrInfoContext {
+        pub callback: Box<GetAddrInfoCallback>,
+    }
+    impl Context for GetAddrInfoContext {}
+
+    // RegisterRecord
+    type RegisterRecordCallback = dyn Fn(Flags /* flags */, MDNSError /* error */) + Send;
+    pub struct RegisterRecordContext {
+        pub callback: Box<RegisterRecordCallback>,
+    }
+    impl Context for RegisterRecordContext {}
+
+    // NATPortMapping
+    type NATPortMappingCallback = dyn Fn(
+            Flags,              /* flags */
+            u32,                /* interfaceIndex */
+            MDNSError,          /* error */
+            std::net::Ipv4Addr, /* externalAddress */
+            Protocol,           /* protocol */
+            u16,                /* internalPort */
+            u16,                /* externalPort */
+            u32,                /* ttl */
+        ) + Send;
+    pub struct NATPortMappingContext {
+        pub callback: Box<NATPortMappingCallback>,
+    }
+    impl Context for NATPortMappingContext {}
+
+    unsafe fn lossy_string_from_ptr(ptr: *const c_char) -> String {
+        assert!(!ptr.is_null());
+        CStr::from_ptr(ptr).to_string_lossy().into_owned()
+    }
 
     // DNSServiceDomainEnumReply
     pub extern "C" fn domain_enum_reply(
@@ -542,7 +746,18 @@ mod callbacks {
         reply_domain: *const c_char,
         context: *mut c_void,
     ) {
-        unimplemented!();
+        let callback = unsafe {
+            assert!(!context.is_null());
+            &*(context as *mut DomainEnumContext)
+        }
+        .callback
+        .as_ref();
+
+        let flags = Flags::from_bits_truncate(flags);
+        let error = MDNSError::from(error_code);
+        let reply_domain = unsafe { lossy_string_from_ptr(reply_domain) };
+
+        callback(flags, interface_index, error, reply_domain);
     }
 
     // DNSServiceRegisterReply
@@ -555,7 +770,20 @@ mod callbacks {
         domain: *const c_char,
         context: *mut c_void,
     ) {
-        unimplemented!();
+        let callback = unsafe {
+            assert!(!context.is_null());
+            &*(context as *mut RegisterContext)
+        }
+        .callback
+        .as_ref();
+
+        let flags = Flags::from_bits_truncate(flags);
+        let error = MDNSError::from(error_code);
+        let name = unsafe { lossy_string_from_ptr(name) };
+        let regtype = unsafe { lossy_string_from_ptr(regtype) };
+        let domain = unsafe { lossy_string_from_ptr(domain) };
+
+        callback(flags, error, name, regtype, domain);
     }
 
     // DNSServiceBrowseReply
@@ -569,7 +797,27 @@ mod callbacks {
         reply_domain: *const c_char,
         context: *mut c_void,
     ) {
-        unimplemented!();
+        let callback = unsafe {
+            assert!(!context.is_null());
+            &*(context as *mut BrowseContext)
+        }
+        .callback
+        .as_ref();
+
+        let flags = Flags::from_bits_truncate(flags);
+        let error = MDNSError::from(error_code);
+        let service_name = unsafe { lossy_string_from_ptr(service_name) };
+        let regtype = unsafe { lossy_string_from_ptr(regtype) };
+        let reply_domain = unsafe { lossy_string_from_ptr(reply_domain) };
+
+        callback(
+            flags,
+            interface_index,
+            error,
+            service_name,
+            regtype,
+            reply_domain,
+        );
     }
 
     // DNSServiceResolveReply
@@ -585,8 +833,29 @@ mod callbacks {
         txt_record: *const c_uchar,
         context: *mut c_void,
     ) {
-        let port = port.to_le();
-        unimplemented!();
+        let callback = unsafe {
+            assert!(!context.is_null());
+            &*(context as *mut ResolveContext)
+        }
+        .callback
+        .as_ref();
+
+        let flags = Flags::from_bits_truncate(flags);
+        let error = MDNSError::from(error_code);
+        let fullname = unsafe { lossy_string_from_ptr(fullname) };
+        let hosttarget = unsafe { lossy_string_from_ptr(hosttarget) };
+        let port = u16::from_be(port);
+
+        callback(
+            flags,
+            interface_index,
+            error,
+            fullname,
+            hosttarget,
+            port,
+            txt_len,
+            txt_record,
+        );
     }
 
     // DNSServiceQueryRecordReply
@@ -601,25 +870,32 @@ mod callbacks {
         rdlen: u16,
         rdata: *const c_void,
         ttl: u32,
-        _context: *mut c_void,
+        context: *mut c_void,
     ) {
-        if error_code != bindings::kDNSServiceErr_NoError {
-            let error = MDNSError::from(error_code);
-            eprintln!("DNSServiceQueryRecord error: {:?}", error);
-            return;
+        let callback = unsafe {
+            assert!(!context.is_null());
+            &*(context as *mut QueryRecordContext)
         }
+        .callback
+        .as_ref();
 
-        let fullname = unsafe { CStr::from_ptr(fullname).to_string_lossy().into_owned() };
-        let rdata_slice = unsafe { std::slice::from_raw_parts(rdata as *const u8, rdlen as usize) };
+        let flags = Flags::from_bits_truncate(flags);
+        let error = MDNSError::from(error_code);
+        let fullname = unsafe { lossy_string_from_ptr(fullname) };
+        let rrtype = rrtype as u16;
+        let rrclass = rrclass as u16;
 
-        println!("Query callback:");
-        println!("  Fullname: {}", fullname);
-        println!("  Flags: {}", flags);
-        println!("  Interface Index: {}", interface_index);
-        println!("  Record Type: {}", rrtype);
-        println!("  Record Class: {}", rrclass);
-        println!("  TTL: {}", ttl);
-        println!("  RData: {:?}", rdata_slice);
+        callback(
+            flags,
+            interface_index,
+            error,
+            fullname,
+            rrtype,
+            rrclass,
+            rdlen,
+            rdata,
+            ttl,
+        );
     }
 
     // DNSServiceGetAddrInfoReply
@@ -633,7 +909,18 @@ mod callbacks {
         ttl: u32,
         context: *mut c_void,
     ) {
-        unimplemented!();
+        let callback = unsafe {
+            assert!(!context.is_null());
+            &*(context as *mut GetAddrInfoContext)
+        }
+        .callback
+        .as_ref();
+
+        let flags = Flags::from_bits_truncate(flags);
+        let error = MDNSError::from(error_code);
+        let hostname = unsafe { lossy_string_from_ptr(hostname) };
+
+        callback(flags, interface_index, error, hostname, address, ttl);
     }
 
     // DNSServiceRegisterRecordReply
@@ -644,7 +931,17 @@ mod callbacks {
         error_code: bindings::DNSServiceErrorType,
         context: *mut c_void,
     ) {
-        unimplemented!();
+        let callback = unsafe {
+            assert!(!context.is_null());
+            &*(context as *mut RegisterRecordContext)
+        }
+        .callback
+        .as_ref();
+
+        let flags = Flags::from_bits_truncate(flags);
+        let error = MDNSError::from(error_code);
+
+        callback(flags, error);
     }
 
     // DNSServiceNATPortMappingReply
@@ -660,10 +957,29 @@ mod callbacks {
         ttl: u32,
         context: *mut c_void,
     ) {
-        let external_address: std::net::Ipv4Addr = external_address.into();
-        let internal_port = internal_port.to_le();
-        let external_port = external_port.to_le();
+        let callback = unsafe {
+            assert!(!context.is_null());
+            &*(context as *mut NATPortMappingContext)
+        }
+        .callback
+        .as_ref();
 
-        unimplemented!();
+        let flags = Flags::from_bits_truncate(flags);
+        let error = MDNSError::from(error_code);
+        let protocol = protocol.into();
+        let external_address = std::net::Ipv4Addr::from(u32::from_be(external_address));
+        let internal_port = u16::from_be(internal_port);
+        let external_port = u16::from_be(external_port);
+
+        callback(
+            flags,
+            interface_index,
+            error,
+            external_address,
+            protocol,
+            internal_port,
+            external_port,
+            ttl,
+        );
     }
 }

@@ -5,6 +5,7 @@ use bitflags::bitflags;
 use crate::bindings;
 
 bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Flags: bindings::DNSServiceFlags {
         const MoreComing = bindings::kDNSServiceFlagsMoreComing;
         const Add = bindings::kDNSServiceFlagsAdd;

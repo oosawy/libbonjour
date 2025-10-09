@@ -45,8 +45,24 @@ fn main() {
         hostname,
         record_type.into(),
         libbonjour::RecordClass::IN,
-        // libbonjour::query_record_callback,
-        std::ptr::null_mut(),
+        |flags, interface_index, error, fullname, rrtype, rrclass, rdlen, rdata, ttl| {
+            if error != libbonjour::MDNSError::NoError {
+                eprintln!("DNSServiceQueryRecord error: {:?}", error);
+                return;
+            }
+
+            let rdata_slice =
+                unsafe { std::slice::from_raw_parts(rdata as *const u8, rdlen as usize) };
+
+            println!("Query callback:");
+            println!("  Fullname: {}", fullname);
+            println!("  Flags: {:?}", flags);
+            println!("  Interface Index: {}", interface_index);
+            println!("  Record Type: {}", rrtype);
+            println!("  Record Class: {}", rrclass);
+            println!("  TTL: {}", ttl);
+            println!("  RData: {:?}", rdata_slice);
+        },
     ) {
         Ok(c) => c,
         Err(e) => {
