@@ -162,7 +162,7 @@ pub const kDNSServiceErr_PollingMode: DNSServiceErrorType = -65567;
 pub const kDNSServiceErr_Timeout: DNSServiceErrorType = -65568;
 
 // Callback types
-pub type DNSServiceDomainEnumReply = unsafe extern "C" fn(
+pub type DNSServiceDomainEnumReply = unsafe extern "system" fn(
     sdRef: DNSServiceRef,
     flags: DNSServiceFlags,
     interfaceIndex: u32,
@@ -171,7 +171,7 @@ pub type DNSServiceDomainEnumReply = unsafe extern "C" fn(
     context: *mut c_void,
 );
 
-pub type DNSServiceRegisterReply = unsafe extern "C" fn(
+pub type DNSServiceRegisterReply = unsafe extern "system" fn(
     sdRef: DNSServiceRef,
     flags: DNSServiceFlags,
     errorCode: DNSServiceErrorType,
@@ -181,7 +181,7 @@ pub type DNSServiceRegisterReply = unsafe extern "C" fn(
     context: *mut c_void,
 );
 
-pub type DNSServiceBrowseReply = unsafe extern "C" fn(
+pub type DNSServiceBrowseReply = unsafe extern "system" fn(
     sdRef: DNSServiceRef,
     flags: DNSServiceFlags,
     interfaceIndex: u32,
@@ -192,7 +192,7 @@ pub type DNSServiceBrowseReply = unsafe extern "C" fn(
     context: *mut c_void,
 );
 
-pub type DNSServiceResolveReply = unsafe extern "C" fn(
+pub type DNSServiceResolveReply = unsafe extern "system" fn(
     sdRef: DNSServiceRef,
     flags: DNSServiceFlags,
     interfaceIndex: u32,
@@ -205,7 +205,7 @@ pub type DNSServiceResolveReply = unsafe extern "C" fn(
     context: *mut c_void,
 );
 
-pub type DNSServiceQueryRecordReply = unsafe extern "C" fn(
+pub type DNSServiceQueryRecordReply = unsafe extern "system" fn(
     sdRef: DNSServiceRef,
     flags: DNSServiceFlags,
     interfaceIndex: u32,
@@ -219,7 +219,7 @@ pub type DNSServiceQueryRecordReply = unsafe extern "C" fn(
     context: *mut c_void,
 );
 
-pub type DNSServiceGetAddrInfoReply = unsafe extern "C" fn(
+pub type DNSServiceGetAddrInfoReply = unsafe extern "system" fn(
     sdRef: DNSServiceRef,
     flags: DNSServiceFlags,
     interfaceIndex: u32,
@@ -230,7 +230,7 @@ pub type DNSServiceGetAddrInfoReply = unsafe extern "C" fn(
     context: *mut c_void,
 );
 
-pub type DNSServiceRegisterRecordReply = unsafe extern "C" fn(
+pub type DNSServiceRegisterRecordReply = unsafe extern "system" fn(
     sdRef: DNSServiceRef,
     RecordRef: DNSRecordRef,
     flags: DNSServiceFlags,
@@ -238,7 +238,7 @@ pub type DNSServiceRegisterRecordReply = unsafe extern "C" fn(
     context: *mut c_void,
 );
 
-pub type DNSServiceNATPortMappingReply = unsafe extern "C" fn(
+pub type DNSServiceNATPortMappingReply = unsafe extern "system" fn(
     sdRef: DNSServiceRef,
     flags: DNSServiceFlags,
     interfaceIndex: u32,
@@ -261,7 +261,7 @@ pub union _TXTRecordRef_t {
 pub type TXTRecordRef = _TXTRecordRef_t;
 
 // FFI function declarations
-extern "C" {
+extern "system" {
     pub fn DNSServiceGetProperty(
         property: *const c_char,
         result: *mut c_void,
